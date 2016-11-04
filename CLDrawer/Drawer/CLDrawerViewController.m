@@ -14,8 +14,8 @@
 #define LeftScrollX 100
 #define RightScrollX ContentWidth - 80
 
-#define ContentWidth     self.view.frame.size.width
-#define ContentHeight    self.view.frame.size.height
+#define ContentWidth     [UIScreen mainScreen].bounds.size.width
+#define ContentHeight    [UIScreen mainScreen].bounds.size.height
 #define LeftMenuOriginX  -(LeftMenuWidth+((LeftMenuWidth*(1-ScaleLevel))/2))
 #define RightMenuOriginX ContentWidth
 
@@ -44,12 +44,36 @@ typedef NS_ENUM(NSInteger, CLScrollDirection) {
 @property (nonatomic, strong, readwrite) UITapGestureRecognizer *leftCloseTapGestureRecognizer;
 @property (nonatomic, strong, readwrite) UITapGestureRecognizer *rightCloseTapGestureRecognizer;
 /** --TODO待添加功能[遮罩效果,拖拽过程中有渐变黑色效果]*/
-/** --TODO待添加功能[添加配置属性,诸如:抽屉宽度,缩放比例等]*/
+// 待添加功能[添加配置属性,诸如:抽屉宽度,缩放比例等]
+/** --展开和收起状态下左右视图的坐标位置*/
+@property (nonatomic, assign, readonly) CGRect showLeftMenuRect;
+@property (nonatomic, assign, readonly) CGRect showRightMenuRect;
+@property (nonatomic, assign, readonly) CGRect closeLeftMenuCGRect;
+@property (nonatomic, assign, readonly) CGRect closeRightMenuCGRect;
+@property (nonatomic, assign, readonly) CGRect showContentRect;
+@property (nonatomic, assign, readonly) CGRect showLeftContentRect;
+@property (nonatomic, assign, readonly) CGRect showRightContentRect;
+/** --可拖拽位置 即左边沿开启左抽屉动画,右边沿开启右抽屉动画*/
+@property (nonatomic, assign, readonly) CGFloat dragLeftMenuMaxOriginX;
+@property (nonatomic, assign, readonly) CGFloat dragRightMenuMaxOriginX;
+
 /** --TODO待完善功能[将可复用代码模块化,优化代码]*/
 
 @end
 
 @implementation CLDrawerViewController
+
+- (instancetype)init
+{
+    if (self = [super init]) {
+        
+        _leftMenuWidth   = LeftMenuWidth;
+        _rightMenuWidth  = RightMenuWidth;
+        _scaleLevel      = ScaleLevel;
+        [self setupSetting];
+    }
+    return self;
+}
 
 - (instancetype)initDrawerViewController:(UIViewController *)drawerViewController leftMenuController:(UIViewController *)leftMenuController rightMenuController:(UIViewController *)rightMenuController
 {
@@ -83,19 +107,36 @@ typedef NS_ENUM(NSInteger, CLScrollDirection) {
     // Dispose of any resources that can be recreated.
 }
 
+#pragma mark - setter
+- (void)setScaleLevel:(CGFloat)scaleLevel
+{
+    _scaleLevel = scaleLevel;
+    [self setupSetting];
+}
+- (void)setLeftMenuWidth:(CGFloat)leftMenuWidth
+{
+    _leftMenuWidth = leftMenuWidth;
+    [self setupSetting];
+}
+- (void)setRightMenuWidth:(CGFloat)rightMenuWidth
+{
+    _rightMenuWidth = rightMenuWidth;
+    [self setupSetting];
+}
+
 #pragma mark - 重新设计UI
 - (void)setupContentViewController
 {
     [self addChildViewController:self.contentVC];
     [self.view addSubview:self.contentVC.view];
-    [self.contentVC.view setFrame:self.view.frame];
+    [self.contentVC.view setFrame:self.showContentRect];
 }
 - (void)setupLeftMenuViewController
 {
     if (self.leftMenuVC) {
         [self addChildViewController:self.leftMenuVC];
         [self.view addSubview:self.leftMenuVC.view];
-        [self.leftMenuVC.view setFrame:CGRectMake(LeftMenuOriginX, ContentHeight*ScaleLevel/2, LeftMenuWidth*ScaleLevel, ContentHeight*ScaleLevel)];
+        [self.leftMenuVC.view setFrame:self.closeLeftMenuCGRect];
     }
 }
 - (void)setupRightMenuViewController
@@ -103,13 +144,56 @@ typedef NS_ENUM(NSInteger, CLScrollDirection) {
     if (self.rightMenuVC) {
         [self addChildViewController:self.rightMenuVC];
         [self.view addSubview:self.rightMenuVC.view];
-        [self.rightMenuVC.view setFrame:CGRectMake(RightMenuOriginX, 0, RightMenuWidth, ContentHeight)];
+        [self.rightMenuVC.view setFrame:self.closeRightMenuCGRect];
     }
 }
 - (void)setupTapGestureRecognizer
 {
     self.leftCloseTapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(closeLeftMenu)];
     self.rightCloseTapGestureRecognizer= [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(closeRightMenu)];
+}
+- (void)setupSetting
+{
+    _dragLeftMenuMaxOriginX = self.leftMenuWidth/2;
+    _dragRightMenuMaxOriginX = ContentWidth-self.rightMenuWidth;
+    
+    _showLeftMenuRect    = CGRectMake(0, 0, self.leftMenuWidth, ContentHeight);
+    _showRightMenuRect   = CGRectMake(ContentWidth-self.rightMenuWidth, 0, self.rightMenuWidth, ContentHeight);
+    
+    _closeLeftMenuCGRect = CGRectMake(-(self.leftMenuWidth+((self.leftMenuWidth*(1-self.scaleLevel))/2)), ContentHeight*self.scaleLevel/2, self.leftMenuWidth*self.scaleLevel, ContentHeight*self.scaleLevel);
+    _closeRightMenuCGRect= CGRectMake(ContentWidth, 0, self.rightMenuWidth, ContentHeight);
+    
+    _showContentRect     = CGRectMake(0, 0, ContentWidth, ContentHeight);
+    _showLeftContentRect = CGRectMake(self.leftMenuWidth+(1-self.scaleLevel)*ContentWidth/2, (1-self.scaleLevel)*ContentHeight/2, ContentWidth*self.scaleLevel, ContentHeight*self.scaleLevel);
+    _showRightContentRect= _showContentRect;
+}
+#pragma mark -- frame
+- (CGRect)contentRectWithDragLeftMenu:(CGFloat)offsetLevel
+{
+    /** --第三步,计算容器的坐标和大小*/
+    // 容器的宽度
+    CGFloat cWidth = ((1-offsetLevel)*(1-self.scaleLevel)+self.scaleLevel)*ContentWidth;
+    // 容器的高度
+    CGFloat cHeight = ((1-offsetLevel)*(1-self.scaleLevel)+self.scaleLevel)*ContentHeight;
+    // 容器X轴坐标
+    CGFloat cOriginX = self.distanceMove+(ContentWidth-cWidth)/2;
+    // 容器Y轴坐标
+    CGFloat cOriginY = (ContentHeight-cHeight)/2;
+    
+    return CGRectMake(cOriginX, cOriginY, cWidth, cHeight);
+}
+- (CGRect)leftMenuRectWithDrag:(CGFloat)offsetLevel
+{
+    // 左抽屉宽度公式 ： d+(w-d)*scale
+    CGFloat lMWidth = self.distanceMove+(self.leftMenuWidth-self.distanceMove)*self.scaleLevel;
+    // 左抽屉高度公式 ：((d/w)+(1-d/w)*scale)*h
+    CGFloat lMHeight = (offsetLevel+(1-offsetLevel)*self.scaleLevel)*ContentHeight;
+    // 左抽屉X轴坐标
+    CGFloat lMOriginX = -self.leftMenuWidth+self.distanceMove+(lMWidth-self.leftMenuVC.view.frame.size.width)/2;
+    // 左抽屉Y轴坐标
+    CGFloat lMOriginY = (ContentHeight-lMHeight)/2;
+    
+    return CGRectMake(lMOriginX, lMOriginY, lMWidth, lMHeight);
 }
 
 #pragma mark -- touch action
@@ -167,77 +251,7 @@ typedef NS_ENUM(NSInteger, CLScrollDirection) {
     // [self deallocData];
     [self setupEndUI];
 }
-- (void)showLeftMenu
-{
-    self.distanceMove  = LeftMenuWidth;
-    CGRect contentRect = self.contentVC.view.frame;
-    CGRect leftMenuRect = self.leftMenuVC.view.frame;
-    
-    contentRect.origin.x   = LeftMenuWidth+(ContentWidth-ContentWidth*ScaleLevel)/2;
-    contentRect.origin.y   = (ContentHeight-ContentHeight*ScaleLevel)/2;
-    contentRect.size.width = ContentWidth*ScaleLevel;
-    contentRect.size.height= ContentHeight*ScaleLevel;
-    leftMenuRect.origin.x = 0;
-    leftMenuRect.origin.y = 0;
-    leftMenuRect.size.width = LeftMenuWidth;
-    leftMenuRect.size.height= ContentHeight;
-    
-    [UIView animateWithDuration:0.2 animations:^{
-        [self.contentVC.view setFrame:contentRect];
-        [self.leftMenuVC.view setFrame:leftMenuRect];
-    } completion:^(BOOL finished) {
-        [self.contentVC.view addGestureRecognizer:self.leftCloseTapGestureRecognizer];
-    }];
-    self.scrollDirection = CLScrollDirectionLeft;
-}
-- (void)closeLeftMenu
-{
-    CGRect contentRect = self.contentVC.view.frame;
-    CGRect leftMenuRect = self.leftMenuVC.view.frame;
-    
-    contentRect.origin.x   = 0;
-    contentRect.origin.y   = 0;
-    contentRect.size.width = ContentWidth;
-    contentRect.size.height= ContentHeight;
-    leftMenuRect.origin.x = -LeftMenuWidth;
-    leftMenuRect.origin.y = ContentHeight*ScaleLevel/2;
-    leftMenuRect.size.width = LeftMenuWidth*ScaleLevel;
-    leftMenuRect.size.height= ContentHeight*ScaleLevel;
-    
-    [UIView animateWithDuration:0.2 animations:^{
-        [self.contentVC.view setFrame:contentRect];
-        [self.leftMenuVC.view setFrame:leftMenuRect];
-    } completion:^(BOOL finished) {
-        [self.contentVC.view removeGestureRecognizer:self.leftCloseTapGestureRecognizer];
-    }];
-    [self deallocData];
-}
-- (void)showRightMenu
-{
-    CGRect rightMenuRect = self.rightMenuVC.view.frame;
-    
-    rightMenuRect.origin.x = ContentWidth - RightMenuWidth;
-    
-    [UIView animateWithDuration:0.2 animations:^{
-        [self.rightMenuVC.view setFrame:rightMenuRect];
-    } completion:^(BOOL finished) {
-        [self.contentVC.view addGestureRecognizer:self.rightCloseTapGestureRecognizer];
-    }];
-    self.scrollDirection = CLScrollDirectionRight;
-}
-- (void)closeRightMenu
-{
-    CGRect rightMenuRect = self.rightMenuVC.view.frame;
-    
-    rightMenuRect.origin.x = ContentWidth;
-    
-    [UIView animateWithDuration:0.2 animations:^{
-        [self.rightMenuVC.view setFrame:rightMenuRect];
-    } completion:^(BOOL finished) {
-        [self.contentVC.view removeGestureRecognizer:self.rightCloseTapGestureRecognizer];
-    }];
-    [self deallocData];
-}
+
 - (void)reSetUpUIWithDiffTouchPointX:(CGFloat)diffPointX
 {
     if (self.scrollDirection==CLScrollDirectionLeft) {
@@ -246,103 +260,45 @@ typedef NS_ENUM(NSInteger, CLScrollDirection) {
         CGRect contentRect = self.contentVC.view.frame;
         CGRect leftMenuRect= self.leftMenuVC.view.frame;
         
-        if ((diffPointX>0&&self.distanceMove<LeftMenuWidth)) {
-            CGFloat offsetLevel = (self.distanceMove/LeftMenuWidth);
+        if ((diffPointX>0&&self.distanceMove<self.leftMenuWidth)) {
+            CGFloat offsetLevel = (self.distanceMove/self.leftMenuWidth);
             if (offsetLevel<=0) offsetLevel = 0;
-            /** --第二步,计算左抽屉的坐标和大小*/
-            // 左抽屉宽度公式 ： d+(w-d)*scale
-            CGFloat lMWidth = self.distanceMove+(LeftMenuWidth-self.distanceMove)*ScaleLevel;
-            // 左抽屉高度公式 ：((d/w)+(1-d/w)*scale)*h
-            CGFloat lMHeight = (offsetLevel+(1-offsetLevel)*ScaleLevel)*ContentHeight;
-            // 左抽屉X轴坐标
-            CGFloat lMOriginX = -LeftMenuWidth+self.distanceMove+(lMWidth-leftMenuRect.size.width)/2;
-            // 左抽屉Y轴坐标
-            CGFloat lMOriginY = (ContentHeight-lMHeight)/2;
+            contentRect = [self contentRectWithDragLeftMenu:offsetLevel];
+            leftMenuRect= [self leftMenuRectWithDrag:offsetLevel];
             
-            /** --第三步,计算容器的坐标和大小*/
-            // 容器的宽度
-            CGFloat cWidth = ((1-offsetLevel)*(1-ScaleLevel)+ScaleLevel)*ContentWidth;
-            // 容器的高度
-            CGFloat cHeight = ((1-offsetLevel)*(1-ScaleLevel)+ScaleLevel)*ContentHeight;
-            // 容器X轴坐标
-            CGFloat cOriginX = self.distanceMove+(ContentWidth-cWidth)/2;
-            // 容器Y轴坐标
-            CGFloat cOriginY = (ContentHeight-cHeight)/2;
-            
-            contentRect = CGRectMake(cOriginX, cOriginY, cWidth, cHeight);
-            leftMenuRect= CGRectMake(lMOriginX, lMOriginY, lMWidth, lMHeight);
-            
-            if (self.distanceMove>LeftMenuWidth) {
-                contentRect.origin.x   = LeftMenuWidth+(ContentWidth-ContentWidth*ScaleLevel)/2;
-                contentRect.origin.y   = (ContentHeight-ContentHeight*ScaleLevel)/2;
-                contentRect.size.width = ContentWidth*ScaleLevel;
-                contentRect.size.height= ContentHeight*ScaleLevel;
-                leftMenuRect.origin.x = 0;
-                leftMenuRect.origin.y = 0;
-                leftMenuRect.size.width = LeftMenuWidth;
-                leftMenuRect.size.height= ContentHeight;
+            if (self.distanceMove>self.leftMenuWidth) {
+                contentRect = self.showLeftContentRect;
+                leftMenuRect= self.showLeftMenuRect;
             }
         }else if ((diffPointX<0&&contentRect.origin.x>0)){
-            CGFloat offsetLevel = (self.distanceMove/LeftMenuWidth);
+            CGFloat offsetLevel = (self.distanceMove/self.leftMenuWidth);
             if (offsetLevel>=1) offsetLevel = 1;
-            /** --第二步,计算左抽屉的坐标和大小*/
-            // 左抽屉宽度公式 ： d+(w-d)*scale
-            CGFloat lMWidth = self.distanceMove+(LeftMenuWidth-self.distanceMove)*ScaleLevel;
-            // 左抽屉高度公式 ：((d/w)+(1-d/w)*scale)*h
-            CGFloat lMHeight = (offsetLevel+(1-offsetLevel)*ScaleLevel)*ContentHeight;
-            // 左抽屉X轴坐标
-            CGFloat lMOriginX = -LeftMenuWidth+self.distanceMove+(lMWidth-leftMenuRect.size.width)/2;
-            // 左抽屉Y轴坐标
-            CGFloat lMOriginY = (ContentHeight-lMHeight)/2;
-            
-            /** --第三步,计算容器的坐标和大小*/
-            // 容器的宽度
-            CGFloat cWidth = ((1-offsetLevel)*(1-ScaleLevel)+ScaleLevel)*ContentWidth;
-            // 容器的高度
-            CGFloat cHeight = ((1-offsetLevel)*(1-ScaleLevel)+ScaleLevel)*ContentHeight;
-            // 容器X轴坐标
-            CGFloat cOriginX = self.distanceMove+(ContentWidth-cWidth)/2;
-            // 容器Y轴坐标
-            CGFloat cOriginY = (ContentHeight-cHeight)/2;
-            
-            contentRect = CGRectMake(cOriginX, cOriginY, cWidth, cHeight);
-            leftMenuRect= CGRectMake(lMOriginX, lMOriginY, lMWidth, lMHeight);
+            contentRect = [self contentRectWithDragLeftMenu:offsetLevel];
+            leftMenuRect= [self leftMenuRectWithDrag:offsetLevel];
             
             if ((contentRect.origin.x<0)) {
-                contentRect.origin.x   = 0;
-                contentRect.origin.y   = 0;
-                contentRect.size.width = ContentWidth;
-                contentRect.size.height= ContentHeight;
-                leftMenuRect.origin.x = -LeftMenuWidth;
-                leftMenuRect.origin.y = ContentHeight*ScaleLevel/2;
-                leftMenuRect.size.width = LeftMenuWidth*ScaleLevel;
-                leftMenuRect.size.height= ContentHeight*ScaleLevel;
+                contentRect = self.showContentRect;
+                leftMenuRect= self.closeLeftMenuCGRect;
             }else if (leftMenuRect.origin.x>=0){
-                contentRect.origin.x   = LeftMenuWidth+(ContentWidth-ContentWidth*ScaleLevel)/2;
-                contentRect.origin.y   = (ContentHeight-ContentHeight*ScaleLevel)/2;
-                contentRect.size.width = ContentWidth*ScaleLevel;
-                contentRect.size.height= ContentHeight*ScaleLevel;
-                leftMenuRect.origin.x = 0;
-                leftMenuRect.origin.y = 0;
-                leftMenuRect.size.width = LeftMenuWidth;
-                leftMenuRect.size.height= ContentHeight;
+                contentRect = self.showLeftContentRect;
+                leftMenuRect= self.showLeftMenuRect;
             }
         }
         [self.contentVC.view setFrame:contentRect];
         [self.leftMenuVC.view setFrame:leftMenuRect];
     }else if (self.scrollDirection==CLScrollDirectionRight) {
         CGRect rightMenuRect = self.rightMenuVC.view.frame;
-        if ((diffPointX<0&&rightMenuRect.origin.x>ContentWidth-RightMenuWidth)) {
+        if ((diffPointX<0&&rightMenuRect.origin.x>ContentWidth-self.rightMenuWidth)) {
             rightMenuRect.origin.x += diffPointX;
             
             if ((rightMenuRect.origin.x>ContentWidth)) {
-                rightMenuRect.origin.x = ContentWidth;
+                rightMenuRect = self.closeRightMenuCGRect;
             }
         } else if ((diffPointX>0&&rightMenuRect.origin.x<ContentWidth)) {
             rightMenuRect.origin.x += diffPointX;
             
-            if ((rightMenuRect.origin.x<ContentWidth-RightMenuWidth)) {
-                rightMenuRect.origin.x = ContentWidth-RightMenuWidth;
+            if ((rightMenuRect.origin.x<ContentWidth-self.rightMenuWidth)) {
+                rightMenuRect = self.showRightMenuRect;
             }
         }
         [self.rightMenuVC.view setFrame:rightMenuRect];
@@ -351,18 +307,59 @@ typedef NS_ENUM(NSInteger, CLScrollDirection) {
 - (void)setupEndUI
 {
     if (self.scrollDirection==CLScrollDirectionLeft) {
-        if (self.contentVC.view.frame.origin.x>LeftScrollX) {
+        if (self.contentVC.view.frame.origin.x>self.dragLeftMenuMaxOriginX) {
             [self showLeftMenu];
         }else{
             [self closeLeftMenu];
         }
     }else if (self.scrollDirection==CLScrollDirectionRight) {
-        if (self.rightMenuVC.view.frame.origin.x>RightScrollX+40) {
+        if (self.rightMenuVC.view.frame.origin.x>self.dragRightMenuMaxOriginX+40) {
             [self closeRightMenu];
         }else{
             [self showRightMenu];
         }
     }
+}
+#pragma mark -- animation method
+- (void)showLeftMenu
+{
+    self.distanceMove  = self.leftMenuWidth;
+    
+    [UIView animateWithDuration:0.2 animations:^{
+        [self.contentVC.view setFrame:self.showLeftContentRect];
+        [self.leftMenuVC.view setFrame:self.showLeftMenuRect];
+    } completion:^(BOOL finished) {
+        [self.contentVC.view addGestureRecognizer:self.leftCloseTapGestureRecognizer];
+    }];
+    self.scrollDirection = CLScrollDirectionLeft;
+}
+- (void)closeLeftMenu
+{
+    [UIView animateWithDuration:0.2 animations:^{
+        [self.contentVC.view setFrame:self.showContentRect];
+        [self.leftMenuVC.view setFrame:self.closeLeftMenuCGRect];
+    } completion:^(BOOL finished) {
+        [self.contentVC.view removeGestureRecognizer:self.leftCloseTapGestureRecognizer];
+    }];
+    [self deallocData];
+}
+- (void)showRightMenu
+{
+    [UIView animateWithDuration:0.2 animations:^{
+        [self.rightMenuVC.view setFrame:self.showRightMenuRect];
+    } completion:^(BOOL finished) {
+        [self.contentVC.view addGestureRecognizer:self.rightCloseTapGestureRecognizer];
+    }];
+    self.scrollDirection = CLScrollDirectionRight;
+}
+- (void)closeRightMenu
+{
+    [UIView animateWithDuration:0.2 animations:^{
+        [self.rightMenuVC.view setFrame:self.closeRightMenuCGRect];
+    } completion:^(BOOL finished) {
+        [self.contentVC.view removeGestureRecognizer:self.rightCloseTapGestureRecognizer];
+    }];
+    [self deallocData];
 }
 
 /*
